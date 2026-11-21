@@ -157,7 +157,7 @@ selected = st.sidebar.multiselect("생육 측정 항목 선택", avail, default=
 if not selected:
     selected = avail
 
-st.title("🌱 우리 학교 극지식물 개체별 생육 차이 분석")
+st.title("🌱 같은 스마트팜, 다른 생육 — 극지식물 개체별 생육 차이 분석")
 if env_file is not None or growth_file is not None:
     st.caption(f"📍 {school} 데이터")
 else:
