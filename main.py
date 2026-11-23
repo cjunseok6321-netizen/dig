@@ -1,4 +1,5 @@
 import io
+import os
 import re
 
 import numpy as np
@@ -25,6 +26,10 @@ FONT = "Malgun Gothic, Apple SD Gothic Neo, Noto Sans KR, sans-serif"
 COLORS = {"상위 25%": "#d9480f", "중간 50%": "#adb5bd", "하위 25%": "#1c7ed6", "전체": "#868e96"}
 UNIT = {"생중량": "g", "잎 수": "장", "지상부 길이": "mm", "지하부 길이": "mm"}
 GROWTH_COLS = ["생중량", "잎 수", "지상부 길이", "지하부 길이"]
+# 기본 데이터: 파일을 올리지 않아도 이 CSV 2개로 바로 분석
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ENV = os.path.join(BASE_DIR, "송도고_환경데이터.csv")
+DEFAULT_GROWTH = os.path.join(BASE_DIR, "송도고_생육결과데이터.csv")
 ENV_LABEL = {"temperature": "온도(℃)", "humidity": "습도(%)", "ph": "pH", "ec": "EC(mS/cm)"}
 
 
@@ -128,15 +133,30 @@ def show(fig):
 
 # ---------------------------------------------------------------- 사이드바 (파일은 한 번만 읽기)
 st.sidebar.header("📂 데이터 올리기")
+st.sidebar.caption("파일을 올리지 않으면 송도고 기본 데이터로 분석해요.")
 env_file = st.sidebar.file_uploader("환경 CSV", type="csv")
 growth_file = st.sidebar.file_uploader("생육 CSV", type="csv")
 
+
+def pick_bytes(up_file, default_path):
+    # 업로드한 파일이 있으면 그것을, 없으면 기본 파일을 사용 (바이트, 파일명, 업로드 여부)
+    if up_file is not None:
+        return up_file.getvalue(), up_file.name, True
+    if os.path.exists(default_path):
+        with open(default_path, "rb") as fh:
+            return fh.read(), os.path.basename(default_path), False
+    return None, "", False
+
+
+env_bytes, env_name, env_up = pick_bytes(env_file, DEFAULT_ENV)
+growth_bytes, growth_name, growth_up = pick_bytes(growth_file, DEFAULT_GROWTH)
+
 env_df, growth_df = None, None
 with st.spinner("데이터를 불러오는 중..."):
-    if env_file is not None:
-        env_df = load_df(env_file.getvalue())
-    if growth_file is not None:
-        growth_df = load_df(growth_file.getvalue())
+    if env_bytes is not None:
+        env_df = load_df(env_bytes)
+    if growth_bytes is not None:
+        growth_df = load_df(growth_bytes)
 if env_df is not None and env_df.empty:
     st.sidebar.info("환경 CSV를 읽지 못했어요. 파일을 확인해 주세요.")
     env_df = None
@@ -144,24 +164,28 @@ if growth_df is not None and growth_df.empty:
     st.sidebar.info("생육 CSV를 읽지 못했어요. 파일을 확인해 주세요.")
     growth_df = None
 
+if env_df is not None:
+    st.sidebar.markdown("📌 환경: " + ("업로드한 파일 사용 중" if env_up else "기본 데이터(송도고) 사용 중"))
+if growth_df is not None:
+    st.sidebar.markdown("📌 생육: " + ("업로드한 파일 사용 중" if growth_up else "기본 데이터(송도고) 사용 중"))
+
 school = "우리 학교"
-for f in (env_file, growth_file):
-    if f is not None:
-        name = re.split(r"[_\-\s.]", f.name)[0].strip()
-        if name:
-            school = name
-            break
+for fname in (env_name, growth_name):
+    name = re.split(r"[_\-\s.]", fname)[0].strip() if fname else ""
+    if name:
+        school = name
+        break
 
 avail = [c for c in GROWTH_COLS if has_num(growth_df, c)]
 selected = st.sidebar.multiselect("생육 측정 항목 선택", avail, default=avail)
 if not selected:
     selected = avail
 
-st.title("🌱 같은 스마트팜, 다른 생육 — 극지식물 개체별 생육 차이 분석")
-if env_file is not None or growth_file is not None:
+st.title("🌱 송도고 그린 1팀 - 김예준, 박진우, 최준석, 김지원, 최범현 | 같은 스마트팜, 다른 생육 — 극지식물 개체별 생육 차이 분석")
+if env_df is not None or growth_df is not None:
     st.caption(f"📍 {school} 데이터")
 else:
-    st.info("왼쪽 사이드바에서 환경 CSV와 생육 CSV를 올려 주세요. 한 파일만 올려도 해당 탭은 볼 수 있어요.")
+    st.info("기본 데이터 파일을 찾지 못했어요. 왼쪽 사이드바에서 환경 CSV와 생육 CSV를 올려 주세요.")
 
 
 def add_groups(df):
@@ -226,7 +250,7 @@ def scatter_chart(g, x, y="생중량"):
     st.caption(f"상관계수 r = {r:.2f} → {sign}의 {word} 상관 (상관은 '함께 변한다'는 뜻이지 '원인'이라는 뜻은 아니에요).")
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["📖 실험 개요", "🌡️ 환경 데이터", "📊 생육 결과", "🏁 결론"])
+tab1, tab2, tab3 = st.tabs(["📖 실험 개요", "🌡️ 환경 데이터", "📊 생육 결과"])
 
 # ---------------------------------------------------------------- Tab 1
 with tab1:
@@ -422,79 +446,3 @@ with tab3:
                                    key="dl_growth")
     except Exception as e:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
-
-# ---------------------------------------------------------------- Tab 4 (결론)
-# CSV를 올리지 않아도 항상 보이는 탭입니다. 숫자는 탐구 결과를 그대로 적은 고정 텍스트예요.
-with tab4:
-    st.header("🏁 탐구 결론")
-    st.success("**같은 스마트팜, 다른 생육** — 동일한 환경에서 재배했는데도 81개체의 생육 차이는 매우 컸고, "
-               "생중량과 가장 관련이 큰 지표는 잎 수였다.")
-
-    st.subheader("📌 한눈에 보기")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("분석 개체 수", "81개")
-    m2.metric("평균 생중량", "약 2.48 g", "SD 약 2.21 g", delta_color="off")
-    m3.metric("생중량 최대/최소", "약 250배")
-    m4.metric("생중량 CV", "약 89%")
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("잎 수 ↔ 생중량", "r = 0.8857")
-    k2.metric("지하부 길이 ↔ 생중량", "r = 0.6055")
-    k3.metric("지상부 길이 ↔ 생중량", "r = 0.3521")
-    k4.metric("지상부 ↔ 지하부 길이", "r = 0.6946")
-
-    st.divider()
-
-    with st.container(border=True):
-        st.subheader("1️⃣ 개체 간 생육 차이는 매우 컸다")
-        st.write("이번 분석에서 가장 먼저 확인되는 사실은 동일한 스마트팜 환경에서 재배했음에도 81개체의 생육 차이가 "
-                 "매우 컸다는 점이다. 생중량의 평균은 약 2.48 g이고 표준편차는 약 2.21 g로, 평균 대비 변동성이 크게 "
-                 "나타났다. 생중량 최대·최소 차이는 약 250배에 이르렀으며, CV 역시 약 89% 수준으로 높아, 같은 방식·환경에서 "
-                 "키워도 개체별로 결과가 크게 갈릴 수 있음을 보여준다. 지상부 길이는 평균 약 39.4 mm, 지하부 길이는 평균 "
-                 "약 84.0 mm로, 개체 간 차이가 지하부에서 더 두드러졌다.")
-
-    with st.container(border=True):
-        st.subheader("2️⃣ 생중량과 가장 관련이 큰 항목은 잎 수였다")
-        st.write("생중량과 가장 관련이 큰 항목은 잎 수였다. 잎 수와 생중량의 상관계수는 r=0.8857로 가장 높아, 잎 수가 "
-                 "많을수록 생중량도 커지는 경향이 뚜렷하게 나타났다. 실제로 생중량 상위·하위 21개체를 비교했을 때도 잎 수 "
-                 "평균 차이가 57.7개와 17.0개 수준으로 크게 벌어졌고, 이는 다른 항목보다 더 두드러졌다. 지상부 길이와 "
-                 "생중량의 상관은 r=0.3521, 지하부 길이와 생중량의 상관은 r=0.6055로 나타나, 생중량을 설명할 때는 잎 수가 "
-                 "가장 강한 지표였고 지하부 길이도 일정한 설명력을 가졌다.")
-
-    with st.container(border=True):
-        st.subheader("3️⃣ 지상부와 지하부는 함께 자라지만 같은 방식은 아니다")
-        st.write("지상부 길이와 지하부 길이는 서로 양의 상관을 보였으나, 상관이 매우 강한 수준은 아니었다(r=0.6946, "
-                 "R²≈0.4824). 이는 지상부 길이만으로 지하부 길이를 정확히 예측하기 어렵고, 개체마다 지상부와 지하부의 증가 "
-                 "양상이 서로 다를 수 있음을 시사한다. 생중량 예측에서는 잎 수만 사용한 모델도 비교적 높은 설명력을 보였지만, "
-                 "잎 수와 지상부 길이를 함께 쓰면 R²=0.8155로 더 나아졌고, 실제 생중량 범위 내에서 비교적 합리적인 예측을 "
-                 "제공했다. 다만 생중량의 변동 폭이 큰 집단에서는 예측이 더 어려워질 수 있다는 점도 확인된다.")
-
-    st.subheader("💡 핵심 인사이트")
-    i1, i2 = st.columns(2)
-    with i1:
-        st.info("**첫째, 같은 환경이라도 개체 차이는 크다.**\n\n"
-                "동일한 스마트팜 재배 조건이라도 개체별 생육 차이는 상당히 클 수 있으며, 생중량은 평균값만으로 이해하기보다 "
-                "분포와 분산을 함께 봐야 한다.")
-        st.info("**셋째, 지상부와 지하부는 똑같이 자라지 않는다.**\n\n"
-                "지상부와 지하부는 함께 자라지만 완전히 같은 방식으로 증가하지는 않으므로, 한쪽 지표만으로 전체 생육을 "
-                "단정하기는 어렵다.")
-    with i2:
-        st.info("**둘째, 잎 수가 생중량을 가장 잘 설명한다.**\n\n"
-                "생중량과 가장 강하게 연관된 형태는 잎 수였고, 이는 생중량 추정에 유용한 기초 지표가 될 수 있다.")
-        st.info("**넷째, 환경 해석은 신중해야 한다.**\n\n"
-                "환경 요인에 대한 해석은 데이터 시기의 특성과 이상치를 함께 고려해야 한다.")
-
-    with st.container(border=True):
-        st.subheader("🔭 향후 과제")
-        st.write("향후 과제로는 생중량 차이의 원인을 더 구체적으로 확인하는 작업이 필요하다. 생중량 차이가 재배 후기 "
-                 "EC·pH 변화와 관련될 가능성이 있으나, 생육 측정 시점과 환경 변화의 대응 관계가 불확실하므로 단정할 수는 "
-                 "없다. 다음에는 생육 측정 시점을 명확히 기록하고, 개체별 위치 정보나 광량·초기 상태처럼 이번 데이터에 없던 "
-                 "정보를 함께 수집하면 원인과 결과의 관계를 더 구체적으로 검토할 수 있다. 또한 생중량 상위·하위 집단의 "
-                 "차이를 단순히 수치 비교에 그치지 않고, 차이의 배경을 설명할 수 있는 추가 변수를 확보하는 방향으로 "
-                 "확장하면 분석의 해석력이 높아질 것이다.")
-        st.markdown("- 📅 생육 **측정일** 기록\n"
-                    "- 📍 개체별 **위치** 정보 수집\n"
-                    "- 💡 **광량**·초기 상태 등 추가 변수 확보")
-
-    st.caption("※ 상관은 '함께 변한다'는 뜻이지 '원인'이라는 뜻은 아니에요. 이 결과는 송도고등학교 스마트팜의 "
-               "해당 시기 데이터에 한정됩니다.")
